@@ -143,10 +143,12 @@ def test_compile_json(input_json, input_bundle):
     # remove venom related from output formats
     # because they require venom (experimental)
     output_formats = OUTPUT_FORMATS.copy()
+
     del output_formats["bb"]
     del output_formats["bb_runtime"]
     del output_formats["cfg"]
     del output_formats["cfg_runtime"]
+
     foo = compile_from_file_input(
         foo_input,
         output_formats=output_formats,
@@ -376,13 +378,43 @@ def test_compile_json_with_experimental_codegen():
             "evmVersion": "cancun",
             "optimize": "gas",
             "venom": True,
-            "search_paths": [],
-            "outputSelection": {"*": ["ast"]},
+            "search_paths": ["."],
+            "outputSelection": {"*": ["ast", "bb", "bb_runtime", "cfg", "cfg_runtime"]},
         },
     }
 
     settings = get_settings(code)
     assert settings.experimental_codegen is True
+    bb = "function __main_entry {\n  __main_entry:  ; IN=[] OUT=[] => {}\n    exit\n}  ; close function __main_entry\n\n"
+    bb_runtime = "function __main_entry {\n  __main_entry:  ; IN=[] OUT=[fallback, 1_then] => {}\n    %10 = 0\n    %1 = calldataload %10\n    %11 = %1\n    %12 = 224\n    %2 = shr %12, %11\n    %14 = %2\n    %13 = 3264763256\n    %4 = xor %13, %14\n    %15 = %4\n    jnz %15, @fallback, @1_then\n\n  1_then:  ; IN=[__main_entry] OUT=[] => {}\n    %6 = callvalue\n    %16 = %6\n    %7 = iszero %16\n    %17 = %7\n    assert %17\n    %18 = 1\n    %19 = 64\n    mstore %19, %18\n    %20 = 32\n    %21 = 64\n    return %21, %20\n\n  fallback:  ; IN=[__main_entry] OUT=[] => {}\n    %22 = 0\n    %23 = 0\n    revert %23, %22\n    stop\n}  ; close function __main_entry\n\n"
+    cfg = 'digraph G {\nsubgraph "__main_entry" {\n    "__main_entry" [shape=plaintext, \nlabel=<<table border="1" cellborder="0" cellspacing="0"><tr><td align="left"><b>__main_entry</b></td></tr>\n<tr ><td align="left">exit                          </td></tr>\n</table>>, fontname="Courier" fontsize="8"]\n}\n\n\n\n}'
+    cfg_runtime = 'digraph G {\nsubgraph "__main_entry" {\n    "__main_entry" -> "fallback"\n    "__main_entry" -> "1_then"\n    "__main_entry" [shape=plaintext, \nlabel=<<table border="1" cellborder="0" cellspacing="0"><tr><td align="left"><b>__main_entry</b></td></tr>\n<tr ><td align="left">%10 = 0                       </td></tr>\n<tr ><td align="left">%1 = calldataload %10         </td></tr>\n<tr ><td align="left">%11 = %1                      </td></tr>\n<tr ><td align="left">%12 = 224                     </td></tr>\n<tr ><td align="left">%2 = shr %12, %11             </td></tr>\n<tr ><td align="left">%14 = %2                      </td></tr>\n<tr ><td align="left">%13 = 3264763256              </td></tr>\n<tr ><td align="left">%4 = xor %13, %14             </td></tr>\n<tr ><td align="left">%15 = %4                      </td></tr>\n<tr ><td align="left">jnz %15, @fallback, @1_then   </td></tr>\n</table>>, fontname="Courier" fontsize="8"]\n    "1_then" [shape=plaintext, \nlabel=<<table border="1" cellborder="0" cellspacing="0"><tr><td align="left"><b>1_then</b></td></tr>\n<tr ><td align="left">%6 = callvalue                </td></tr>\n<tr ><td align="left">%16 = %6                      </td></tr>\n<tr ><td align="left">%7 = iszero %16               </td></tr>\n<tr ><td align="left">%17 = %7                      </td></tr>\n<tr ><td align="left">assert %17                    </td></tr>\n<tr ><td align="left">%18 = 1                       </td></tr>\n<tr ><td align="left">%19 = 64                      </td></tr>\n<tr ><td align="left">mstore %19, %18               </td></tr>\n<tr ><td align="left">%20 = 32                      </td></tr>\n<tr ><td align="left">%21 = 64                      </td></tr>\n<tr ><td align="left">return %21, %20               </td></tr>\n</table>>, fontname="Courier" fontsize="8"]\n    "fallback" [shape=plaintext, \nlabel=<<table border="1" cellborder="0" cellspacing="0"><tr><td align="left"><b>fallback</b></td></tr>\n<tr ><td align="left">%22 = 0                       </td></tr>\n<tr ><td align="left">%23 = 0                       </td></tr>\n<tr ><td align="left">revert %23, %22               </td></tr>\n<tr ><td align="left">stop                          </td></tr>\n</table>>, fontname="Courier" fontsize="8"]\n}\n\n\n\n}'
+    output_json = compile_json(code)
+    assert "venom" in output_json["contracts"]["foo.vy"]["foo"]
+    venom = output_json["contracts"]["foo.vy"]["foo"]["venom"]
+    assert venom["bb"] == bb
+    assert venom["bb_runtime"] == bb_runtime
+    assert venom["cfg"] == cfg
+    assert venom["cfg_runtime"] == cfg_runtime
+
+def test_compile_json_without_experimental_codegen():
+    venom_keys = ["bb", "bb_runtime", "cfg", "cfg_runtime"]
+    code = {
+        "language": "Vyper",
+        "sources": {"foo.vy": {"content": "@external\ndef foo() -> bool:\n    return True"}},
+        "settings": {
+            "evmVersion": "cancun",
+            "optimize": "gas",
+            "venom": False,
+            "search_paths": ["."],
+            "outputSelection": {"*": venom_keys },
+        },
+    }
+
+    settings = get_settings(code)
+    assert settings.experimental_codegen is False
+    output_json = compile_json(code)
+    assert "venom" not in output_json["contracts"]["foo.vy"]["foo"]
 
 
 def test_compile_json_with_both_venom_aliases():
